@@ -348,7 +348,7 @@ func (c *Chip8) draw(x, y, size byte) {
 
 	for col := 0; col < 8; col++ {
 		for row := 0; row < int(size); row++ {
-			px := int(x) + col
+			px := int(x) - col + 7
 			py := int(y) + row
 			bit := (c.memory[c.I+uint16(row)] & (1 << uint(col))) != 0
 			if px < 64 && py < 32 && px >= 0 && py >= 0 {
@@ -371,10 +371,10 @@ func (c *Chip8) draw(x, y, size byte) {
 						if c.screen[(int(c.V[y])+yline)*2][(int(c.V[x])+xpix)*2] {
 							c.V[0xF] = 1
 						}
-						c.screen[(int(c.V[y])+yline)*2][(int(c.V[x])+xpix)*2] = !c.screen[(int(c.V[y])+yline)*2][(int(c.V[x])+xpix)*2]
-						c.screen[(int(c.V[y])+yline)*2][(int(c.V[x])+xpix)*2+1] = !c.screen[(int(c.V[y])+yline)*2][(int(c.V[x])+xpix)*2+1]
-						c.screen[(int(c.V[y])+yline)*2+1][(int(c.V[x])+xpix)*2] = !c.screen[(int(c.V[y])+yline)*2+1][(int(c.V[x])+xpix)*2]
-						c.screen[(int(c.V[y])+yline)*2+1][(int(c.V[x])+xpix)*2+1] = !c.screen[(int(c.V[y])+yline)*2+1][(int(c.V[x])+xpix)*2+1]
+						// c.screen[(int(c.V[y])+yline)*2][(int(c.V[x])+xpix)*2] = true
+						// c.screen[(int(c.V[y])+yline)*2][(int(c.V[x])+xpix)*2+1] = true
+						// c.screen[(int(c.V[y])+yline)*2+1][(int(c.V[x])+xpix)*2] = true
+						// c.screen[(int(c.V[y])+yline)*2+1][(int(c.V[x])+xpix)*2+1] = true
 					}
 				}
 			}
@@ -394,9 +394,12 @@ func main() {
 
 	// romname := "games/IBM Logo.c8"
 	// romname := "games/Airplane.c8"
-	romname := "games/Pong (1 player).c8"
+	// romname := "games/Pong (1 player).c8"
 	// romname := "games/Maze.c8"
-
+	// romname := "games/Chip8 Picture.c8"
+	// romname := "games/Tron.c8"
+	// romname := "games/BMP Viewer - Hello (C8 example) [hap].c8"
+	romname := "games/Brix [Andreas Gustafsson].c8"
 	chip := new(Chip8)
 	chip.Init()
 
@@ -480,10 +483,6 @@ func main() {
 				case termbox.KeyEsc:
 					return
 					break
-				default:
-					for i := 0; i < 16; i++ {
-						chip.key[i] = 0
-					}
 				}
 			}
 			break
@@ -505,6 +504,9 @@ func main() {
 					}
 					termbox.SetCell(col, row, ' ', termbox.ColorDefault, color)
 				}
+			}
+			for i := 0; i < 16; i++ {
+				chip.key[i] = 0
 			}
 			termbox.Flush()
 			time.Sleep(time.Millisecond * 1)
