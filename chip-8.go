@@ -4,7 +4,7 @@ import (
 	"github.com/nsf/termbox-go"
 	//"encoding/hex"
 	"errors"
-	//"fmt"
+	// "fmt"
 	"io/ioutil"
 	"log"
 	"math/rand"
@@ -320,7 +320,6 @@ func (c *Chip8) Step() error {
 				c.V[i] = c.hp48Flags[i]
 			}*/
 			break
-
 		default:
 			//err = errors.New(fmt.Sprintf("3. Invalid opcode: %04x", op))
 		}
@@ -362,24 +361,6 @@ func (c *Chip8) draw(x, y, size byte) {
 		}
 	}
 
-	/*
-		for yline := 0; yline < int(size); yline++ {
-			data := c.memory[c.I+uint16(yline)]
-			for xpix := 0; xpix < 8; xpix++ {
-				if (data & (0x80 >> uint16(xpix))) != 0 {
-					if (c.V[x]+byte(xpix)) < 64 && (c.V[y]+byte(yline)) < 32 && (c.V[x]+byte(xpix)) >= 0 && (c.V[y]+byte(yline)) >= 0 {
-						if c.screen[(int(c.V[y])+yline)*2][(int(c.V[x])+xpix)*2] {
-							c.V[0xF] = 1
-						}
-						// c.screen[(int(c.V[y])+yline)*2][(int(c.V[x])+xpix)*2] = true
-						// c.screen[(int(c.V[y])+yline)*2][(int(c.V[x])+xpix)*2+1] = true
-						// c.screen[(int(c.V[y])+yline)*2+1][(int(c.V[x])+xpix)*2] = true
-						// c.screen[(int(c.V[y])+yline)*2+1][(int(c.V[x])+xpix)*2+1] = true
-					}
-				}
-			}
-		}
-	*/
 }
 
 func (c *Chip8) LoadGame(rom []byte) {
@@ -399,7 +380,8 @@ func main() {
 	// romname := "games/Chip8 Picture.c8"
 	// romname := "games/Tron.c8"
 	// romname := "games/BMP Viewer - Hello (C8 example) [hap].c8"
-	romname := "games/Brix [Andreas Gustafsson].c8"
+	// romname := "games/Brix [Andreas Gustafsson].c8"
+	romname := "games/Bowling [Gooitzen van der Wal].c8"
 	chip := new(Chip8)
 	chip.Init()
 
@@ -424,6 +406,15 @@ func main() {
 		}
 	}()
 
+	go func() {
+		for {
+			for i := 0; i < 16; i++ {
+				chip.key[i] = 0
+			}
+			time.Sleep(time.Millisecond * 100)
+		}
+	}()
+
 	for {
 		if chip.stop {
 			return
@@ -431,58 +422,61 @@ func main() {
 		select {
 		case ev := <-eventQueue:
 			if ev.Type == termbox.EventKey {
-				switch ev.Key {
-				case termbox.KeyCtrlQ:
+				switch string(ev.Ch) {
+				case "1":
 					chip.key[1] = 1
 					break
-				case termbox.KeyCtrlW:
+				case "2":
 					chip.key[2] = 1
 					break
-				case termbox.KeyCtrlE:
+				case "3":
 					chip.key[3] = 1
 					break
-				case termbox.KeyCtrlR:
+				case " ":
 					chip.key[0xC] = 1
 					break
-				case termbox.KeyCtrlA:
+				case "4":
 					chip.key[4] = 1
 					break
-				case termbox.KeyCtrlS:
+				case "5":
 					chip.key[5] = 1
 					break
-				case termbox.KeyCtrlD:
+				case "6":
 					chip.key[6] = 1
 					break
-				case termbox.KeyCtrlF:
+				case "+":
 					chip.key[0xD] = 1
 					break
-				case termbox.KeyCtrlZ:
+				case "7":
 					chip.key[7] = 1
 					break
-				case termbox.KeyCtrlX:
+				case "8":
 					chip.key[8] = 1
 					break
-				case termbox.KeyCtrlC:
+				case "9":
 					chip.key[9] = 1
 					break
-				case termbox.KeyCtrlV:
+				case "-":
 					chip.key[0xE] = 1
 					break
-				case termbox.KeyArrowLeft:
+				case "*":
 					chip.key[0xA] = 1
 					break
-				case termbox.KeyArrowRight:
+				case "0":
 					chip.key[0] = 1
 					break
-				case termbox.KeyArrowUp:
+				case "/":
 					chip.key[0xB] = 1
 					break
-				case termbox.KeyArrowDown:
+				case ".":
 					chip.key[0xF] = 1
 					break
+				case "r":
+
+				}
+				switch ev.Key {
 				case termbox.KeyEsc:
 					return
-					break
 				}
 			}
 			break
@@ -505,11 +499,8 @@ func main() {
 					termbox.SetCell(col, row, ' ', termbox.ColorDefault, color)
 				}
 			}
-			for i := 0; i < 16; i++ {
-				chip.key[i] = 0
-			}
 			termbox.Flush()
-			time.Sleep(time.Millisecond * 1)
+			time.Sleep(time.Millisecond)
 		}
 	}
 }
