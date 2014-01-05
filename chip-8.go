@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/nsf/termbox-go"
 	//"encoding/hex"
+	"errors"
 	//"fmt"
 	"io/ioutil"
 	"log"
@@ -21,7 +22,7 @@ type Chip8 struct {
 	delayTimer int        //таймер задержки
 	soundTimer int        //таймер звука
 
-	screen [64 * 32]bool //массив, представляющий экран
+	screen [128][64]bool //массив, представляющий экран
 	key    [16]byte      //массив, представляющий клавиатуру
 	stop   bool          //переменная для опкода 00FD
 	mode   int
@@ -31,9 +32,9 @@ func (c *Chip8) Init() {
 	for i := 0; i < 4096; i++ {
 		c.memory[i] = 0x0
 	}
-	for row := 0; row < 32; row++ {
+	for row := 0; row < 128; row++ {
 		for col := 0; col < 64; col++ {
-			c.screen[row*64+col] = false
+			c.screen[row][col] = false
 		}
 	}
 	for i := 0; i < 16; i++ {
@@ -70,32 +71,73 @@ func (c *Chip8) Init() {
 	c.delayTimer = 0
 	c.soundTimer = 0
 	c.stop = false
+	c.mode = 0
 }
 
-func (c *Chip8) Step() {
+func (c *Chip8) Step() error {
+	var err error
+	err = nil
 	var op uint16
 	if c.pc >= uint16(len(c.memory)) {
-		log.Fatal("The ROM file is too large!")
-		return
+		err = errors.New("The ROM file is too large!")
+		return err
 	}
-	op = (uint16(c.memory[c.pc]) << 8) | uint16(c.memory[c.pc+1])
+	op = (uint16(c.memory[c.pc]) << 8) + uint16(c.memory[c.pc+1])
+	c.pc += 2
 	switch (op & 0xF000) >> 12 {
 	case 0x0:
-		switch op & 0xFF {
+		// 00CN. scroll display N lines down *SCHIP*
+		if (op&0x00F0)>>4 == 0xC {
+			N := int(op & 0x000F)
+			for y := 63; y > N; y-- {
+				for x := 0; x < 128; x++ {
+					c.screen[x][y] = c.screen[x][y-N]
+				}
+			}
+			for y := 0; y < N; y++ {
+				for x := 0; x < 128; x++ {
+					c.screen[x][y] = false
+				}
+			}
+			break
+		}
+		switch op & 0x00FF {
 		case 0xE0: // 00E0. Clear the screen.
 			for row := 0; row < 32; row++ {
 				for col := 0; col < 64; col++ {
-					c.screen[row*64+col] = false
+					c.screen[row][col] = false
 				}
 			}
 		case 0xEE: // 00EE.Returns from a subroutine.
 			c.sp--
 			c.pc = c.stack[c.sp]
-			return
+			break
+		case 0xFB: // 00FB. scroll display 4 pixels right *SCHIP*
+			for y := 0; y < 64; y++ {
+				for x := 127; x > 3; x-- {
+					c.screen[x][y] = c.screen[x-4][y]
+				}
+				c.screen[0][y] = false
+				c.screen[1][y] = false
+				c.screen[2][y] = false
+				c.screen[3][y] = false
+			}
+			break
+		case 0xFC: // 00FB. scroll display 4 pixels left *SCHIP*
+			for y := 0; y < 64; y++ {
+				for x := 0; x < 124; x++ {
+					c.screen[x][y] = c.screen[x+4][y]
+				}
+				c.screen[124][y] = false
+				c.screen[125][y] = false
+				c.screen[126][y] = false
+				c.screen[127][y] = false
+			}
+			break
 		case 0xFD: // 00FD. Quit the emulator.
 			c.stop = true
 			log.Print("Quit the emulator")
-			return
+			break
 		case 0xFE: // 00FE. disable extended screen mode *SCHIP*.
 			c.mode = 0
 			break
@@ -103,58 +145,85 @@ func (c *Chip8) Step() {
 			c.mode = 1
 			break
 		default:
-			log.Fatal("Invalid opcode! 1 ", op)
-			return
+			//err = errors.New(fmt.Sprintf("1. Invalid opcode: %04x", op))
 		}
+		break
 	case 0x1: // 1NNN. Jumps to address NNN.
-		c.pc = op & 0xFFF
+		c.pc = op & 0x0FFF
+		break
 	case 0x2: // 2NNN. Calls subroutine at NNN.
-		c.stack[c.sp] = c.pc + 2
+		c.stack[c.sp] = c.pc
 		c.sp++
-		c.pc = op & 0xFFF
+		c.pc = op & 0x0FFF
+		break
 	case 0x3: // 3XNN. Skips the next instruction if VX equals NN.
-		if c.V[(op&0x0F00)>>8] == byte(op&0xFF) {
+		if c.V[(op&0x0F00)>>8] == byte(op&0x00FF) {
 			c.pc += 2
 		}
+		break
 	case 0x4: // 4XNN. Skips the next instruction if VX doesn't equal NN.
-		if c.V[(op&0x0F00)>>8] != byte(op&0xFF) {
+		if c.V[(op&0x0F00)>>8] != byte(op&0x00FF) {
 			c.pc += 2
 		}
+		break
 	case 0x5: // 6XNN. Skips the next instruction if VX equals VY.
 		if c.V[(op&0x0F00)>>8] == c.V[(op&0x00F0)>>4] {
 			c.pc += 2
 		}
+		break
 	case 0x6: // 5XY0. Sets VX to NN.
-		c.V[(op&0x0F00)>>8] = byte(op & 0xFF)
+		c.V[(op&0x0F00)>>8] = byte(op & 0x00FF)
+		break
 	case 0x7: // 7XNN. Adds NN to VX.
-		c.V[(op&0x0F00)>>8] += byte(op & 0xFF)
+		c.V[(op&0x0F00)>>8] += byte(op & 0x00FF)
+		break
 	case 0x8:
 		x := (op & 0x0F00) >> 8
 		y := (op & 0x00F0) >> 4
 		switch op & 0x000F {
 		case 0x0: // 8XY0. Sets VX to the value of VY.
 			c.V[x] = c.V[y]
+			break
 		case 0x1: // 8XY1. Sets VX to VX or VY.
 			c.V[x] |= c.V[y]
+			break
 		case 0x2: // 8XY2. Sets VX to VX and VY.
 			c.V[x] &= c.V[y]
+			break
 		case 0x3: // 8XY3. Sets VX to VX xor VY.
 			c.V[x] ^= c.V[y]
+			break
 		case 0x4: // 8XY4. Adds VY to VX. VF is set to 1 when there's a carry, and to 0 when there isn't.
-			c.V[x] += c.V[y]
-		case 0x5: // 8XY5. VY is subtracted from VX. VF is set to 0 when there's a borrow, and 1 when there isn't.
-			c.V[x] -= c.V[y]
-		case 0x6: // 8XY6. Shifts VX right by one. VF is set to the value of the least significant bit of VX before the shift.
-		case 0x7: // 8XY7. Sets VX to VY minus VX. VF is set to 0 when there's a borrow, and 1 when there isn't.
-			c.V[x] = c.V[y] - c.V[x]
-			if c.V[y] > c.V[x] {
+			if int(c.V[x]+c.V[y]) > 255 {
 				c.V[0xF] = 1
 			} else {
 				c.V[0xF] = 0
 			}
+			c.V[x] += c.V[y]
+			break
+		case 0x5: // 8XY5. VY is subtracted from VX. VF is set to 0 when there's a borrow, and 1 when there isn't.
+			if c.V[x] > c.V[y] {
+				c.V[0xF] = 1
+			} else {
+				c.V[0xF] = 0
+			}
+			c.V[x] -= c.V[x]
+			break
+		case 0x6: // 8XY6. Shifts VX right by one. VF is set to the value of the least significant bit of VX before the shift.
+			c.V[0xF] = c.V[x] & 0x1
+			c.V[x] >>= 1
+			break
+		case 0x7: // 8XY7. Sets VX to VY minus VX. VF is set to 0 when there's a borrow, and 1 when there isn't.
+			if c.V[y] >= c.V[x] {
+				c.V[0xF] = 1
+			} else {
+				c.V[0xF] = 0
+			}
+			c.V[x] = c.V[y] - c.V[x]
+			break
 		case 0xE: // 8XYE. Shifts VX left by one. VF is set to the value of the most significant bit of VX before the shift.
-			c.V[0xF] = (c.V[((op&0x0F00)>>8)] >> 7) & 0x01
-			c.V[((op & 0x0F00) >> 8)] <<= 1
+			c.V[0xF] = (c.V[x] >> 7) & 0x01
+			c.V[x] <<= 1
 		}
 	case 0x9: // 9XY0. Skips the next instruction if VX doesn't equal VY.
 		if c.V[(op&0x0F00)>>8] != c.V[(op&0x00F0)>>4] {
@@ -165,7 +234,7 @@ func (c *Chip8) Step() {
 	case 0xB: // BNNN. Jumps to the address NNN plus V0.
 		c.pc = (op & 0xFFF) + uint16(c.V[0])
 	case 0xC: // CXNN. Sets VX to a random number and NN.
-		c.V[(op&0x0F00)>>8] = byte(rand.Intn(int(op&0xFF) + 1))
+		c.V[(op&0x0F00)>>8] = byte(uint16(rand.Intn(255)) & (op & 0x00FF))
 	case 0xD: // DXYN. Draws a sprite at coordinate (VX, VY) that has a width of 8 pixels and a height of N pixels.
 		x := (op & 0x0F00) >> 8
 		y := (op & 0x00F0) >> 4
@@ -185,8 +254,7 @@ func (c *Chip8) Step() {
 			break
 
 		default:
-			log.Fatal("Invalid opcode!", op)
-			return
+			//err = errors.New(fmt.Sprintf("2. Invalid opcode: %04x", op))
 		}
 		break
 	case 0xF:
@@ -194,7 +262,7 @@ func (c *Chip8) Step() {
 		case 0x07: // FX07. Sets VX = delayTimer.
 			c.V[((op & 0x0F00) >> 8)] = byte(c.delayTimer)
 			break
-		case 0x0a: // FX0A. Sets VX = key, wait for keypress.
+		case 0x0A: // FX0A. Sets VX = key, wait for keypress.
 			c.pc -= 2
 			for n := 0; n < 16; n++ {
 				if c.key[n] == 1 {
@@ -211,8 +279,8 @@ func (c *Chip8) Step() {
 			c.soundTimer = int(c.V[((op & 0x0F00) >> 8)])
 			break
 		case 0x1E: // FX1E. Sets I = I + VX; set VF if buffer overflow.
-			I := c.I + uint16(c.V[((op&0x0F00)>>8)])
-			if I > 0xFFF {
+			c.I += uint16(c.V[((op & 0x0F00) >> 8)])
+			if c.I > 0xFFF {
 				c.V[0xF] = 1
 			} else {
 				c.V[0xF] = 0
@@ -232,12 +300,12 @@ func (c *Chip8) Step() {
 			n -= c.memory[c.I+1] * 10
 			c.memory[c.I+2] = n
 			break
-		case 0x55: // FX55 - store V0 .. VX in [I] .. [I+X].
+		case 0x55: // FX55. store V0 .. VX in [I] .. [I+X].
 			for n := 0; n <= int((op&0x0F00)>>8); n++ {
 				c.memory[c.I+1] = c.V[n]
 			}
 			break
-		case 0x65: // FX65 - read V0 .. VX from [I] .. [I+X].
+		case 0x65: // FX65. read V0 .. VX from [I] .. [I+X].
 			for n := 0; n <= int((op&0x0F00)>>8); n++ {
 				c.V[n] = c.memory[c.I+1]
 			}
@@ -254,15 +322,13 @@ func (c *Chip8) Step() {
 			break
 
 		default:
-			log.Fatal("Invalid opcode! 2 ", op)
-			return
+			//err = errors.New(fmt.Sprintf("3. Invalid opcode: %04x", op))
 		}
 		break
 	default:
-		log.Fatal("Invalid opcode! 3 ", op)
-		return
+		//err = errors.New(fmt.Sprintf("4. Invalid opcode: %04x", op))
 	}
-	c.pc += 2
+	return err
 }
 
 func (c *Chip8) timersDown() {
@@ -279,21 +345,41 @@ func (c *Chip8) draw(x, y, size byte) {
 	if size == 0 {
 		size = 16
 	}
+
 	for col := 0; col < 8; col++ {
 		for row := 0; row < int(size); row++ {
 			px := int(x) + col
 			py := int(y) + row
 			bit := (c.memory[c.I+uint16(row)] & (1 << uint(col))) != 0
 			if px < 64 && py < 32 && px >= 0 && py >= 0 {
-				src := c.screen[py*64+px]
+				src := c.screen[py][px]
 				dst := (bit != src)
-				c.screen[py*64+px] = dst
+				c.screen[py][px] = dst
 				if src && !dst {
 					c.V[0xF] = 1
 				}
 			}
 		}
 	}
+
+	/*
+		for yline := 0; yline < int(size); yline++ {
+			data := c.memory[c.I+uint16(yline)]
+			for xpix := 0; xpix < 8; xpix++ {
+				if (data & (0x80 >> uint16(xpix))) != 0 {
+					if (c.V[x]+byte(xpix)) < 64 && (c.V[y]+byte(yline)) < 32 && (c.V[x]+byte(xpix)) >= 0 && (c.V[y]+byte(yline)) >= 0 {
+						if c.screen[(int(c.V[y])+yline)*2][(int(c.V[x])+xpix)*2] {
+							c.V[0xF] = 1
+						}
+						c.screen[(int(c.V[y])+yline)*2][(int(c.V[x])+xpix)*2] = !c.screen[(int(c.V[y])+yline)*2][(int(c.V[x])+xpix)*2]
+						c.screen[(int(c.V[y])+yline)*2][(int(c.V[x])+xpix)*2+1] = !c.screen[(int(c.V[y])+yline)*2][(int(c.V[x])+xpix)*2+1]
+						c.screen[(int(c.V[y])+yline)*2+1][(int(c.V[x])+xpix)*2] = !c.screen[(int(c.V[y])+yline)*2+1][(int(c.V[x])+xpix)*2]
+						c.screen[(int(c.V[y])+yline)*2+1][(int(c.V[x])+xpix)*2+1] = !c.screen[(int(c.V[y])+yline)*2+1][(int(c.V[x])+xpix)*2+1]
+					}
+				}
+			}
+		}
+	*/
 }
 
 func (c *Chip8) LoadGame(rom []byte) {
@@ -306,7 +392,10 @@ func (c *Chip8) LoadGame(rom []byte) {
 
 func main() {
 
-	romname := "games/IBM Logo.c8"
+	// romname := "games/IBM Logo.c8"
+	// romname := "games/Airplane.c8"
+	romname := "games/Pong (1 player).c8"
+	// romname := "games/Maze.c8"
 
 	chip := new(Chip8)
 	chip.Init()
@@ -324,7 +413,6 @@ func main() {
 		panic(err)
 	}
 	defer termbox.Close()
-	termbox.SetInputMode(termbox.InputAlt)
 
 	eventQueue := make(chan termbox.Event)
 	go func() {
@@ -332,6 +420,7 @@ func main() {
 			eventQueue <- termbox.PollEvent()
 		}
 	}()
+
 	for {
 		if chip.stop {
 			return
@@ -340,40 +429,40 @@ func main() {
 		case ev := <-eventQueue:
 			if ev.Type == termbox.EventKey {
 				switch ev.Key {
-				case termbox.KeyF1:
+				case termbox.KeyCtrlQ:
 					chip.key[1] = 1
 					break
-				case termbox.KeyF2:
+				case termbox.KeyCtrlW:
 					chip.key[2] = 1
 					break
-				case termbox.KeyF3:
+				case termbox.KeyCtrlE:
 					chip.key[3] = 1
 					break
-				case termbox.KeyF4:
+				case termbox.KeyCtrlR:
 					chip.key[0xC] = 1
 					break
-				case termbox.KeyF5:
+				case termbox.KeyCtrlA:
 					chip.key[4] = 1
 					break
-				case termbox.KeyF6:
+				case termbox.KeyCtrlS:
 					chip.key[5] = 1
 					break
-				case termbox.KeyF7:
+				case termbox.KeyCtrlD:
 					chip.key[6] = 1
 					break
-				case termbox.KeyF8:
+				case termbox.KeyCtrlF:
 					chip.key[0xD] = 1
 					break
-				case termbox.KeyF9:
+				case termbox.KeyCtrlZ:
 					chip.key[7] = 1
 					break
-				case termbox.KeyF10:
+				case termbox.KeyCtrlX:
 					chip.key[8] = 1
 					break
-				case termbox.KeyF11:
+				case termbox.KeyCtrlC:
 					chip.key[9] = 1
 					break
-				case termbox.KeyF12:
+				case termbox.KeyCtrlV:
 					chip.key[0xE] = 1
 					break
 				case termbox.KeyArrowLeft:
@@ -401,21 +490,24 @@ func main() {
 		default:
 			termbox.Clear(termbox.ColorDefault, termbox.ColorDefault)
 			chip.timersDown()
-			chip.Step()
-
+			err := chip.Step()
+			if err != nil {
+				log.Panic(err)
+				return
+			}
 			color := termbox.ColorDefault
 			for row := 0; row < 32; row++ {
 				for col := 0; col < 64; col++ {
-					if chip.screen[row*64+col] {
+					if chip.screen[row][col] {
 						color = termbox.ColorBlue
 					} else {
-						color = termbox.ColorDefault
+						color = termbox.ColorGreen
 					}
 					termbox.SetCell(col, row, ' ', termbox.ColorDefault, color)
 				}
 			}
 			termbox.Flush()
-			time.Sleep(time.Millisecond * 60)
+			time.Sleep(time.Millisecond * 1)
 		}
 	}
 }
